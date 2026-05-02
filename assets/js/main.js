@@ -1019,6 +1019,7 @@
     var playbackConfirmed = false;
     var retryAttached = false;
     var failureTimeoutId = null;
+    var playbackFrameProbeActive = false;
 
     function clearFailureTimeout() {
       if (failureTimeoutId) {
@@ -1042,7 +1043,9 @@
     function setUnavailable(reason) {
       clearFailureTimeout();
       removeRetryListeners();
+      playbackFrameProbeActive = false;
       coverSection.classList.remove("cover--video-ready");
+      coverSection.classList.remove("cover--video-timeout");
       coverSection.classList.remove("cover--has-video-src");
       coverSection.classList.add("cover--video-unavailable");
       coverDebugLog("cover_video_unavailable", {
@@ -1050,11 +1053,41 @@
       });
     }
 
+    function confirmPlaybackFromState(trigger) {
+      if (playbackConfirmed) return true;
+      if (!coverVideo.paused && coverVideo.currentTime > 0) {
+        onPlaybackStarted(trigger || "state_confirmed");
+        return true;
+      }
+      return false;
+    }
+
+    function probePlaybackByFrame() {
+      if (playbackConfirmed || playbackFrameProbeActive) return;
+      if (typeof coverVideo.requestVideoFrameCallback !== "function") return;
+      playbackFrameProbeActive = true;
+      try {
+        coverVideo.requestVideoFrameCallback(function () {
+          playbackFrameProbeActive = false;
+          if (playbackConfirmed) return;
+          if (!confirmPlaybackFromState("video_frame_callback")) {
+            addRetryListeners();
+            scheduleFailureFallback();
+          }
+        });
+      } catch (e) {
+        playbackFrameProbeActive = false;
+      }
+    }
+
     function onPlaybackStarted(trigger) {
+      if (playbackConfirmed) return;
       playbackConfirmed = true;
+      playbackFrameProbeActive = false;
       clearFailureTimeout();
       removeRetryListeners();
       coverSection.classList.remove("cover--video-unavailable");
+      coverSection.classList.remove("cover--video-timeout");
       coverSection.classList.add("cover--video-ready");
       coverDebugLog("cover_video_playback_started", {
         trigger: trigger || "unknown",
@@ -1065,8 +1098,14 @@
       clearFailureTimeout();
       failureTimeoutId = setTimeout(function () {
         if (!playbackConfirmed) {
-          coverDebugLog("cover_video_timeout_fallback");
-          setUnavailable("timeout");
+          coverSection.classList.add("cover--video-timeout");
+          coverDebugLog("cover_video_timeout_soft_fallback", {
+            paused: coverVideo.paused,
+            currentTime: coverVideo.currentTime,
+            readyState: coverVideo.readyState,
+            networkState: coverVideo.networkState,
+          });
+          addRetryListeners();
         }
       }, COVER_VIDEO_FAIL_TIMEOUT);
     }
@@ -1075,6 +1114,7 @@
       if (shouldRespectReducedMotionForVideo) return;
       coverDebugLog("cover_video_play_attempt", {
         trigger: trigger || "unknown",
+        afterTimeout: coverSection.classList.contains("cover--video-timeout"),
       });
       var playAttempt;
       try {
@@ -1091,13 +1131,23 @@
 
       // Older engines may not return a Promise from play().
       if (!playAttempt || typeof playAttempt.then !== "function") {
-        onPlaybackStarted("non_promise_play");
+        coverDebugLog("cover_video_non_promise_play");
+        if (!confirmPlaybackFromState("non_promise_state_confirmed")) {
+          addRetryListeners();
+          scheduleFailureFallback();
+          probePlaybackByFrame();
+        }
         return;
       }
 
       playAttempt
         .then(function () {
-          onPlaybackStarted("play_promise_resolved");
+          if (!confirmPlaybackFromState("play_promise_resolved")) {
+            coverDebugLog("cover_video_play_promise_pending");
+            addRetryListeners();
+            scheduleFailureFallback();
+            probePlaybackByFrame();
+          }
         })
         .catch(function (err) {
           coverDebugLog("cover_video_play_rejected", {
@@ -1111,7 +1161,10 @@
     }
 
     function onFirstGesture() {
-      coverDebugLog("cover_video_first_gesture_retry");
+      coverDebugLog("cover_video_first_gesture_retry", {
+        afterTimeout: coverSection.classList.contains("cover--video-timeout"),
+        playbackConfirmed: playbackConfirmed,
+      });
       attemptPlay("first_gesture");
     }
 
@@ -1125,6 +1178,11 @@
     });
     coverVideo.addEventListener("playing", function () {
       onPlaybackStarted("playing_event");
+    });
+    coverVideo.addEventListener("timeupdate", function () {
+      if (coverVideo.currentTime > 0 && !coverVideo.paused) {
+        onPlaybackStarted("timeupdate_event");
+      }
     });
     coverVideo.addEventListener("error", function () {
       coverDebugLog("cover_video_error");

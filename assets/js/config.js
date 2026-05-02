@@ -99,8 +99,9 @@ const WEDDING_CONFIG = {
   // ──────────────────────────────────────────────
   // COVER (opening section: names + date)
   // Prefer videoSources (ordered by browser compatibility).
+  // Keep MP4 first because it is the most reliable path on Safari/iOS.
   // Keep videoUrl for backward compatibility with older script logic.
-  // For broad support, encode MP4 as H.264 + AAC (+faststart).
+  // For broad support, encode MP4 as H.264 baseline-compatible (+faststart).
   // ──────────────────────────────────────────────
   cover: {
     groomName: "Hoàng Phúc",
