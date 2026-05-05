@@ -240,6 +240,65 @@
     });
   }
 
+  /**
+   * Narrow detection for Zalo embedded browser on iOS. Inline / muted autoplay
+   * is controlled by the host WKWebView; the site cannot override it.
+   */
+  function detectCoverInAppBrowser() {
+    var ua = typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
+    var isIOS =
+      /iPad|iPhone|iPod/.test(ua) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    var isZalo = /Zalo/i.test(ua);
+    if (isIOS && isZalo) return "zalo";
+    return "unknown";
+  }
+
+  function coverPlaybackContext(inAppBrowser) {
+    return inAppBrowser === "zalo" ? "zalo_ios_in_app" : "default";
+  }
+
+  /** One-line hint + optional external-browser link; Zalo iOS only. */
+  function ensureZaloCoverHint(coverSection) {
+    if (!coverSection || coverSection.querySelector(".cover__in-app-hint")) return;
+
+    var wrap = document.createElement("div");
+    wrap.className = "cover__in-app-hint";
+    wrap.setAttribute("aria-live", "polite");
+
+    var p = document.createElement("p");
+    p.className = "cover__in-app-hint-text";
+    p.appendChild(
+      document.createTextNode("Video nền không phát được trong Zalo. "),
+    );
+
+    var url =
+      typeof window !== "undefined" && window.location && window.location.href
+        ? window.location.href
+        : "";
+    var httpsOk = /^https:/i.test(url);
+
+    if (httpsOk) {
+      var a = document.createElement("a");
+      a.className = "cover__in-app-hint-link";
+      a.href = url;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent = "Mở trong trình duyệt";
+      p.appendChild(a);
+      p.appendChild(document.createTextNode(" để xem đầy đủ."));
+    } else {
+      p.appendChild(
+        document.createTextNode(
+          "Bạn có thể mở thiệp bằng Safari hoặc Chrome.",
+        ),
+      );
+    }
+
+    wrap.appendChild(p);
+    coverSection.appendChild(wrap);
+  }
+
   function getPrefersReducedMotion() {
     return !!(
       window.matchMedia &&
@@ -932,6 +991,10 @@
 
     if (!coverSection || !coverVideo) return;
 
+    var staleInAppHint = coverSection.querySelector(".cover__in-app-hint");
+    if (staleInAppHint) staleInAppHint.remove();
+    coverSection.classList.remove("cover--zalo-in-app");
+
     coverSection.classList.remove("cover--video-ready");
     coverSection.classList.remove("cover--video-unavailable");
     coverSection.classList.remove("cover--has-video-src");
@@ -973,6 +1036,10 @@
         source && typeof source.src === "string" && source.src.trim() !== ""
       );
     });
+
+    var inAppBrowser = detectCoverInAppBrowser();
+    var playbackContext = coverPlaybackContext(inAppBrowser);
+
     var coverDebugLog = createCoverVideoDebugLogger(coverVideo, usableSources, {
       prefersReducedMotion: prefersReducedMotion,
       forceVideoWithReducedMotion: forceVideoWithReducedMotion,
@@ -981,6 +1048,8 @@
       shouldRespectReducedMotionForVideo: shouldRespectReducedMotionForVideo,
       failTimeoutMs: COVER_VIDEO_FAIL_TIMEOUT,
       preload: coverVideo.preload,
+      inAppBrowser: inAppBrowser,
+      playbackContext: playbackContext,
     });
     coverDebugLog("cover_video_init");
 
@@ -1001,6 +1070,24 @@
     coverDebugLog("cover_video_sources_selected", {
       selectedSourceCount: usableSources.length,
     });
+
+    // Zalo iOS webview: inline autoplay/video surface is unreliable; avoid
+    // loading sources or calling play() so taps do not invoke fullscreen player.
+    if (inAppBrowser === "zalo") {
+      coverSection.classList.add("cover--zalo-in-app");
+      ensureZaloCoverHint(coverSection);
+      coverVideo.preload = "none";
+      coverVideo.removeAttribute("autoplay");
+      coverVideo.autoplay = false;
+      coverVideo.removeAttribute("src");
+      while (coverVideo.firstChild) {
+        coverVideo.removeChild(coverVideo.firstChild);
+      }
+      coverDebugLog("cover_video_zalo_in_app_static", {
+        reason: "wkwebview_inline_unsupported",
+      });
+      return;
+    }
 
     // Let the browser choose the best source from an ordered list.
     coverVideo.removeAttribute("src");
