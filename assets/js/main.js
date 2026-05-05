@@ -1272,6 +1272,9 @@
       coverDebugLog("cover_video_canplay");
       attemptPlay("canplay_event");
     });
+    coverVideo.addEventListener("play", function () {
+      onPlaybackStarted("play_event");
+    });
     coverVideo.addEventListener("playing", function () {
       onPlaybackStarted("playing_event");
     });
