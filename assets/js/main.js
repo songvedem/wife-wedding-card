@@ -2458,7 +2458,7 @@
       var stopped = false;
       var finished = false;
       var idleResumeId = null;
-      var IDLE_RESUME_MS = 20000;
+      var IDLE_RESUME_MS = 15000;
       var consentElement = document.querySelector(
         AMBIENT_AUDIO_CONSENT_SELECTOR,
       );
