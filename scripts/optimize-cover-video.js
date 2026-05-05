@@ -46,7 +46,7 @@ const H264_PRESET = "slow";
 const H264_KEYINT = 48; // 2s GOP at 24fps for stable decode/seek on older devices.
 
 // JS patch values
-const NEW_TIMEOUT_MS = 12000;
+const NEW_TIMEOUT_MS = 5000;
 const NEW_PRELOAD = "auto";
 
 // ---------------------------------------------------------------------------

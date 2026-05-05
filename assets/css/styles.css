@@ -666,8 +666,8 @@ main {
   background: transparent;
 }
 
-/* Zalo iOS in-app: inline video unavailable; quiet hint, avoid tap-to-fullscreen */
-.cover.cover--zalo-in-app .cover__video {
+/* When Zalo hint is shown (autoplay not confirmed): disable video taps */
+.cover.cover--zalo-cover-hint .cover__video {
   pointer-events: none;
 }
 
