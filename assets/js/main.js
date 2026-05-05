@@ -284,9 +284,9 @@
       a.href = url;
       a.target = "_blank";
       a.rel = "noopener noreferrer";
-      a.textContent = "Mở trong trình duyệt";
+      a.textContent =
+        "Mở trong trình duyệt Safari hoặc Chrome để xem đầy đủ";
       p.appendChild(a);
-      p.appendChild(document.createTextNode(" để xem đầy đủ."));
     } else {
       p.appendChild(
         document.createTextNode(
