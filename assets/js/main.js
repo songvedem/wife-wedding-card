@@ -64,7 +64,7 @@
   var AMBIENT_AUDIO_VOLUME = 0.08;
   var GESTURE_RETRY_EVENTS = ["pointerdown", "touchstart", "keydown"];
   var AMBIENT_AUDIO_CONSENT_SELECTOR = "#ambient-audio-consent";
-  var COVER_VIDEO_FAIL_TIMEOUT = 12000;
+  var COVER_VIDEO_FAIL_TIMEOUT = 5000;
   var DEBUG_CONFIG = WEDDING_CONFIG.debug || {};
   var COVER_VIDEO_TELEMETRY_ENABLED = !!DEBUG_CONFIG.coverVideoTelemetry;
   var COVER_VIDEO_TELEMETRY_ENDPOINT =
@@ -238,6 +238,71 @@
     events.forEach(function (evt) {
       document.removeEventListener(evt, handler);
     });
+  }
+
+  /**
+   * Narrow detection for Zalo embedded browser on iOS. Inline / muted autoplay
+   * is controlled by the host WKWebView; the site cannot override it.
+   */
+  function detectCoverInAppBrowser() {
+    var ua = typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
+    var isIOS =
+      /iPad|iPhone|iPod/.test(ua) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    var isZalo = /Zalo/i.test(ua);
+    if (isIOS && isZalo) return "zalo";
+    return "unknown";
+  }
+
+  function coverPlaybackContext(inAppBrowser) {
+    return inAppBrowser === "zalo" ? "zalo_ios_in_app" : "default";
+  }
+
+  /**
+   * Inserts the Zalo iOS hint once (call only after autoplay failure paths).
+   * @returns {boolean} whether a new hint node was added
+   */
+  function ensureZaloCoverHint(coverSection) {
+    if (!coverSection || coverSection.querySelector(".cover__in-app-hint"))
+      return false;
+
+    var wrap = document.createElement("div");
+    wrap.className = "cover__in-app-hint";
+    wrap.setAttribute("aria-live", "polite");
+
+    var p = document.createElement("p");
+    p.className = "cover__in-app-hint-text";
+    p.appendChild(
+      document.createTextNode("Video nền không phát được trong Zalo. "),
+    );
+
+    var url =
+      typeof window !== "undefined" && window.location && window.location.href
+        ? window.location.href
+        : "";
+    var httpsOk = /^https:/i.test(url);
+
+    if (httpsOk) {
+      var a = document.createElement("a");
+      a.className = "cover__in-app-hint-link";
+      a.href = url;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent =
+        "Mở trong trình duyệt Safari hoặc Chrome để xem đầy đủ";
+      p.appendChild(a);
+    } else {
+      p.appendChild(
+        document.createTextNode(
+          "Bạn có thể mở thiệp bằng Safari hoặc Chrome.",
+        ),
+      );
+    }
+
+    wrap.appendChild(p);
+    coverSection.classList.add("cover--zalo-cover-hint");
+    coverSection.appendChild(wrap);
+    return true;
   }
 
   function getPrefersReducedMotion() {
@@ -932,6 +997,10 @@
 
     if (!coverSection || !coverVideo) return;
 
+    var staleInAppHint = coverSection.querySelector(".cover__in-app-hint");
+    if (staleInAppHint) staleInAppHint.remove();
+    coverSection.classList.remove("cover--zalo-cover-hint");
+
     coverSection.classList.remove("cover--video-ready");
     coverSection.classList.remove("cover--video-unavailable");
     coverSection.classList.remove("cover--has-video-src");
@@ -973,6 +1042,10 @@
         source && typeof source.src === "string" && source.src.trim() !== ""
       );
     });
+
+    var inAppBrowser = detectCoverInAppBrowser();
+    var playbackContext = coverPlaybackContext(inAppBrowser);
+
     var coverDebugLog = createCoverVideoDebugLogger(coverVideo, usableSources, {
       prefersReducedMotion: prefersReducedMotion,
       forceVideoWithReducedMotion: forceVideoWithReducedMotion,
@@ -981,6 +1054,8 @@
       shouldRespectReducedMotionForVideo: shouldRespectReducedMotionForVideo,
       failTimeoutMs: COVER_VIDEO_FAIL_TIMEOUT,
       preload: coverVideo.preload,
+      inAppBrowser: inAppBrowser,
+      playbackContext: playbackContext,
     });
     coverDebugLog("cover_video_init");
 
@@ -1019,6 +1094,7 @@
     var playbackConfirmed = false;
     var retryAttached = false;
     var failureTimeoutId = null;
+    var playbackFrameProbeActive = false;
 
     function clearFailureTimeout() {
       if (failureTimeoutId) {
@@ -1042,19 +1118,65 @@
     function setUnavailable(reason) {
       clearFailureTimeout();
       removeRetryListeners();
+      playbackFrameProbeActive = false;
       coverSection.classList.remove("cover--video-ready");
+      coverSection.classList.remove("cover--video-timeout");
       coverSection.classList.remove("cover--has-video-src");
       coverSection.classList.add("cover--video-unavailable");
       coverDebugLog("cover_video_unavailable", {
         reason: reason || "unknown",
       });
+      if (
+        inAppBrowser === "zalo" &&
+        reason !== "reduced_motion" &&
+        !playbackConfirmed
+      ) {
+        if (ensureZaloCoverHint(coverSection)) {
+          coverDebugLog("cover_video_zalo_hint_shown", {
+            reason: reason || "unavailable",
+          });
+        }
+      }
+    }
+
+    function confirmPlaybackFromState(trigger) {
+      if (playbackConfirmed) return true;
+      if (!coverVideo.paused && coverVideo.currentTime > 0) {
+        onPlaybackStarted(trigger || "state_confirmed");
+        return true;
+      }
+      return false;
+    }
+
+    function probePlaybackByFrame() {
+      if (playbackConfirmed || playbackFrameProbeActive) return;
+      if (typeof coverVideo.requestVideoFrameCallback !== "function") return;
+      playbackFrameProbeActive = true;
+      try {
+        coverVideo.requestVideoFrameCallback(function () {
+          playbackFrameProbeActive = false;
+          if (playbackConfirmed) return;
+          if (!confirmPlaybackFromState("video_frame_callback")) {
+            addRetryListeners();
+            scheduleFailureFallback();
+          }
+        });
+      } catch (e) {
+        playbackFrameProbeActive = false;
+      }
     }
 
     function onPlaybackStarted(trigger) {
+      if (playbackConfirmed) return;
       playbackConfirmed = true;
+      playbackFrameProbeActive = false;
       clearFailureTimeout();
       removeRetryListeners();
       coverSection.classList.remove("cover--video-unavailable");
+      coverSection.classList.remove("cover--video-timeout");
+      coverSection.classList.remove("cover--zalo-cover-hint");
+      var zaloHintEl = coverSection.querySelector(".cover__in-app-hint");
+      if (zaloHintEl) zaloHintEl.remove();
       coverSection.classList.add("cover--video-ready");
       coverDebugLog("cover_video_playback_started", {
         trigger: trigger || "unknown",
@@ -1065,8 +1187,21 @@
       clearFailureTimeout();
       failureTimeoutId = setTimeout(function () {
         if (!playbackConfirmed) {
-          coverDebugLog("cover_video_timeout_fallback");
-          setUnavailable("timeout");
+          coverSection.classList.add("cover--video-timeout");
+          coverDebugLog("cover_video_timeout_soft_fallback", {
+            paused: coverVideo.paused,
+            currentTime: coverVideo.currentTime,
+            readyState: coverVideo.readyState,
+            networkState: coverVideo.networkState,
+          });
+          addRetryListeners();
+          if (inAppBrowser === "zalo") {
+            if (ensureZaloCoverHint(coverSection)) {
+              coverDebugLog("cover_video_zalo_hint_shown", {
+                reason: "autoplay_timeout_soft",
+              });
+            }
+          }
         }
       }, COVER_VIDEO_FAIL_TIMEOUT);
     }
@@ -1075,6 +1210,7 @@
       if (shouldRespectReducedMotionForVideo) return;
       coverDebugLog("cover_video_play_attempt", {
         trigger: trigger || "unknown",
+        afterTimeout: coverSection.classList.contains("cover--video-timeout"),
       });
       var playAttempt;
       try {
@@ -1091,13 +1227,23 @@
 
       // Older engines may not return a Promise from play().
       if (!playAttempt || typeof playAttempt.then !== "function") {
-        onPlaybackStarted("non_promise_play");
+        coverDebugLog("cover_video_non_promise_play");
+        if (!confirmPlaybackFromState("non_promise_state_confirmed")) {
+          addRetryListeners();
+          scheduleFailureFallback();
+          probePlaybackByFrame();
+        }
         return;
       }
 
       playAttempt
         .then(function () {
-          onPlaybackStarted("play_promise_resolved");
+          if (!confirmPlaybackFromState("play_promise_resolved")) {
+            coverDebugLog("cover_video_play_promise_pending");
+            addRetryListeners();
+            scheduleFailureFallback();
+            probePlaybackByFrame();
+          }
         })
         .catch(function (err) {
           coverDebugLog("cover_video_play_rejected", {
@@ -1111,7 +1257,10 @@
     }
 
     function onFirstGesture() {
-      coverDebugLog("cover_video_first_gesture_retry");
+      coverDebugLog("cover_video_first_gesture_retry", {
+        afterTimeout: coverSection.classList.contains("cover--video-timeout"),
+        playbackConfirmed: playbackConfirmed,
+      });
       attemptPlay("first_gesture");
     }
 
@@ -1123,8 +1272,16 @@
       coverDebugLog("cover_video_canplay");
       attemptPlay("canplay_event");
     });
+    coverVideo.addEventListener("play", function () {
+      onPlaybackStarted("play_event");
+    });
     coverVideo.addEventListener("playing", function () {
       onPlaybackStarted("playing_event");
+    });
+    coverVideo.addEventListener("timeupdate", function () {
+      if (coverVideo.currentTime > 0 && !coverVideo.paused) {
+        onPlaybackStarted("timeupdate_event");
+      }
     });
     coverVideo.addEventListener("error", function () {
       coverDebugLog("cover_video_error");
@@ -2301,7 +2458,7 @@
       var stopped = false;
       var finished = false;
       var idleResumeId = null;
-      var IDLE_RESUME_MS = 20000;
+      var IDLE_RESUME_MS = 15000;
       var consentElement = document.querySelector(
         AMBIENT_AUDIO_CONSENT_SELECTOR,
       );

@@ -40,12 +40,13 @@ const TARGET_HEIGHT = 720;
 const FPS = 24;
 const CRF_H264 = 28; // visually transparent behind overlay text
 const CRF_VP9 = 32;
-const H264_PROFILE = "main";
+const H264_PROFILE = "baseline";
 const H264_LEVEL = "3.1";
 const H264_PRESET = "slow";
+const H264_KEYINT = 48; // 2s GOP at 24fps for stable decode/seek on older devices.
 
 // JS patch values
-const NEW_TIMEOUT_MS = 12000;
+const NEW_TIMEOUT_MS = 5000;
 const NEW_PRELOAD = "auto";
 
 // ---------------------------------------------------------------------------
@@ -107,6 +108,8 @@ function encodeMP4() {
     `-i "${SOURCE_VIDEO}"`,
     `-vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}"`,
     `-c:v libx264 -profile:v ${H264_PROFILE} -level ${H264_LEVEL}`,
+    `-pix_fmt yuv420p`,
+    `-x264-params "keyint=${H264_KEYINT}:min-keyint=${H264_KEYINT}:scenecut=0"`,
     `-crf ${CRF_H264} -preset ${H264_PRESET}`,
     `-r ${FPS}`,
     "-an",
