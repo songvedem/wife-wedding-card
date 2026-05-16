@@ -106,8 +106,8 @@ const WEDDING_CONFIG = {
   cover: {
     groomName: "Hoàng Phúc",
     brideName: "Hồng Vân",
-    locationLine1: "BIỂN ĐỒ SƠN,",
-    locationLine2: "HẢI PHÒNG",
+    locationLine1: "HỘI TRƯỜNG LA NỘI,",
+    locationLine2: "HÀ NỘI",
     forceVideoWithReducedMotion: true,
     videoSources: [
       {
@@ -361,8 +361,8 @@ const WEDDING_CONFIG = {
   location: {
     backgroundImage: LOCATION_IMAGE,
     heading: "Địa điểm",
-    venueName: "KHÁCH SẠN HOLIDAY",
-    venueAddress: "Trong Hòn Dáu Resort, Đồ Sơn, Hải Phòng",
+    venueName: "Hội trường La Nội, ",
+    venueAddress: "phường Dương Nội, Hà Nội",
     googleMapsEmbedUrl:
       "https://maps.google.com/maps?q=Kh%C3%A1ch%20s%E1%BA%A1n%20Holiday%20H%C3%B2n%20D%E1%BA%A5u%20Resort%2C%20%C4%90%E1%BB%93%20S%C6%A1n%2C%20H%E1%BA%A3i%20Ph%C3%B2ng&z=13&output=embed",
     mapLinkText: "Mở trên Google Maps",
